@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Resonant Energy Building Calculator</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; max-width: 600px; }
+        h2 { color: #2c3e50; }
+        label { display: block; margin: 10px 0 5px; font-weight: bold; }
+        input { width: 120px; padding: 5px; margin-bottom: 10px; }
+        button { padding: 8px 16px; background-color: #3498db; color: white; border: none; cursor: pointer; }
+        button:hover { background-color: #2980b9; }
+        #result { margin-top: 20px; padding: 10px; background-color: #ecf0f1; border-radius: 5px; }
+        canvas { border: 1px solid #34495e; margin-top: 20px; }
+        .tooltip { position: relative; display: inline; }
+        .tooltip .tooltiptext { 
+            visibility: hidden; width: 200px; background-color: #555; color: #fff; 
+            text-align: center; border-radius: 5px; padding: 5px; position: absolute; 
+            z-index: 1; bottom: 125%; left: 50%; margin-left: -100px; opacity: 0; 
+            transition: opacity 0.3s; 
+        }
+        .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+        #powerBar { width: 400px; height: 20px; background-color: #ddd; margin-top: 10px; }
+        #powerFill { height: 100%; background-color: #2ecc71; width: 0; }
+    </style>
+</head>
+<body>
+    <h2>Resonant Energy Building Calculator</h2>
+    <p>Estimate the resonant frequency and harvestable energy from building vibrations.</p>
+
+    <label class="tooltip">Height (m): 
+        <input id="height" type="number" value="50" min="1">
+        <span class="tooltiptext">Building height in meters. Used to estimate frequency if mass/stiffness not provided.</span>
+    </label>
+    <label class="tooltip">Vibration Amplitude (m): 
+        <input id="amplitude" type="number" value="0.05" min="0" step="0.01">
+        <span class="tooltiptext">Peak sway at the top of the building (default: h/1000).</span>
+    </label>
+    <p>Or, for precise frequency calculation:</p>
+    <label class="tooltip">Mass (kg): 
+        <input id="mass" type="number" value="0" min="0">
+        <span class="tooltiptext">Total mass of the building in kilograms.</span>
+    </label>
+    <label class="tooltip">Stiffness (N/m): 
+        <input id="stiff" type="number" value="0" min="0">
+        <span class="tooltiptext">Structural stiffness of the building in Newtons per meter.</span>
+    </label>
+    <button onclick="calculate()">Calculate</button>
+
+    <div id="result"></div>
+    <canvas id="wave" width="400" height="100"></canvas>
+    <div id="powerBar"><div id="powerFill"></div></div>
+    <p><small>Note: Power estimation assumes piezoelectric harvesters with 100 µW/cm² at 1 Hz and 0.1% strain, scaled by frequency and amplitude. Actual output depends on harvester design and conditions.</small></p>
+
+    <script>
+        function calculate() {
+            // Get input values
+            let height = parseFloat(document.getElementById("height").value);
+            let amplitude = parseFloat(document.getElementById("amplitude").value);
+            let mass = parseFloat(document.getElementById("mass").value);
+            let stiff = parseFloat(document.getElementById("stiff").value);
+
+            // Validate inputs
+            if (height <= 0 && (mass <= 0 || stiff <= 0)) {
+                document.getElementById("result").innerHTML = "Error: Please enter a valid height or both mass and stiffness.";
+                clearVisuals();
+                return;
+            }
+            if (amplitude < 0) {
+                document.getElementById("result").innerHTML = "Error: Vibration amplitude must be non-negative.";
+                clearVisuals();
+                return;
+            }
+
+            // Calculate frequency
+            let f;
+            if (mass > 0 && stiff > 0) {
+                f = (1 / (2 * Math.PI)) * Math.sqrt(stiff / mass);
+            } else if (height > 0) {
+                f = 46 / height;
+                if (amplitude === 0 || isNaN(amplitude)) {
+                    amplitude = height / 1000; // Default amplitude if not provided
+                    document.getElementById("amplitude").value = amplitude.toFixed(4);
+                }
+            } else {
+                document.getElementById("result").innerHTML = "Error: Invalid parameters.";
+                clearVisuals();
+                return;
+            }
+
+            // Calculate period
+            let period = 1 / f;
+
+            // Calculate strain (ε = x₀ / h, average strain approximation)
+            let strain = amplitude / height;
+
+            // Power calculation: P (W/m²) = k * f * ε² * A, where k is calibrated
+            // Base: 100 µW/cm² = 1000 W/m² at f=1 Hz, ε=0.001 (0.1%), A=1 m²
+            // k = 1000 / (1 * 0.001²) = 1e9
+            const k = 1e9; // W / (m² * Hz * strain²)
+            let powerPerM2 = k * f * strain * strain; // W/m²
+            let powerPerM2mW = powerPerM2 * 1000; // mW/m²
+
+            // Cap power for visualization (max 1000 mW/m² for bar)
+            let powerDisplay = Math.min(powerPerM2mW, 1000);
+
+            // Display results
+            document.getElementById("result").innerHTML = `
+                Frequency: ${f.toFixed(2)} Hz<br>
+                Period: ${period.toFixed(2)} s<br>
+                Est. Power: ${powerPerM2mW.toFixed(2)} mW per m²<br>
+                Strain: ${(strain * 100).toFixed(2)}%
+            `;
+
+            // Draw wave and power bar
+            drawWave(f);
+            drawPowerBar(powerDisplay);
+        }
+
+        function drawWave(freq) {
+            let canvas = document.getElementById("wave");
+            let ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.strokeStyle = "#34495e";
+            for (let x = 0; x < 400; x++) {
+                let y = 50 + 40 * Math.sin(2 * Math.PI * freq * x / 400);
+                x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.fillText("Building Oscillation", 10, 20);
+        }
+
+        function drawPowerBar(power) {
+            let bar = document.getElementById("powerFill");
+            let percentage = (power / 1000) * 100; // Scale to 1000 mW/m² max
+            bar.style.width = `${percentage}%`;
+        }
+
+        function clearVisuals() {
+            let ctx = document.getElementById("wave").getContext("2d");
+            ctx.clearRect(0, 0, 400, 100);
+            document.getElementById("powerFill").style.width = "0%";
+        }
+
+        // Initial calculation
+        calculate();
+    </script>
+</body>
+</html>
